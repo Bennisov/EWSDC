@@ -13,34 +13,25 @@ def load_data(file_path):
 # --- Amplitude Characteristic Functions (in dB) ---
 def A_CR_dB(u):
     # |H(jω)| = u / sqrt(1 + u^2) for single CR (differentiator)
-    A = u / np.sqrt(1 + u**2)
-    return 20 * np.log10(A)
+    return u / np.sqrt(1 + u**2)
 
 def A_CR_RC_dB(u):
     # |H(jω)| = u / (1 + u^2) for CR-RC (1st order shaper)
-    A = u / (1 + u**2)
-    return 20 * np.log10(A)
+    return u / (1 + u**2)
 
 def A_CR2_RC_dB(u):
     # |H(jω)| = u^2 / (1 + u^2)^1.5 for CR^2-RC
-    A = u**2 / (1 + u**2)**1.5
-    return 20 * np.log10(A)
+    return u**2 / (1 + u**2)**1.5
 
 def A_CR_RC2_dB(u):
     # |H(jω)| = u / (1 + u^2)^1.5 for CR-RC^2
-    A = u / (1 + u**2)**1.5
-    return 20 * np.log10(A)
+    return u / (1 + u**2)**1.5
 
 def A_CR_RC3_dB(u):
     # |H(jω)| = u / (1 + u**2)**2 for CR-RC^3
-    A = u / (1 + u**2)**2
-    return 20 * np.log10(A)
+    return u / (1 + u**2)**2
+    
 
-# --- Theoretical Transfer Function Magnitude (Linear Scale) ---
-# Used for noise calculation: |H(jω)|^2
-def H_mag_sq(A_dB_func, u):
-    # |H(jω)|^2 = (10^(A_dB/20))^2 = 10^(A_dB/10)
-    return 10**(A_dB_func(u) / 10.0)
 
 # --- Configuration Setup ---
 fs = ["100k", "500k", "1M"]
@@ -81,10 +72,10 @@ for f in fs:
         # Calculate normalized frequency u = 2*pi*f*tau = f/f_g
         u = 2 * np.pi * data[:, 0] * tau
         
-        A_values = c_f(u)
+        A_values = 20 * np.log10(c_f(u))
         
         plt.figure()
-        plt.plot(data[:,0], data[:,1], label="Zmierzone dane [dB]", color='blue', marker='.', linestyle='')
+        plt.plot(data[:,0], data[:,1] - wzmacniacz[:,1], label="Zmierzone dane - wzmacniacz [dB]", color='blue', marker='.', linestyle='')
         plt.plot(data[:,0], A_values, label=f"Teoretyczna ({f.replace('k', ' kHz').replace('M', ' MHz')}) [dB]", color='red')
         
         plt.xscale('log')
@@ -102,24 +93,15 @@ for f in fs:
 wzmacniacz_noise_data = load_data(f"{directory}/wzmacniacz_noise.txt")
 
 # Calculate measured PSD in (uV^2/Hz) for amplifier
-wzmacniacz_noise_psd_meas = wzmacniacz_noise_data[:, 1]**2
-
-# Estimate the input white noise PSD (S_in) from the amplifier output noise
-# Assuming the amplifier acts as a constant gain for f < 1MHz, we can estimate S_in
-# Let's take the mean of the amplifier's measured PSD up to 1 MHz (index approx 100)
-# (Your data's frequency range is needed, but assuming standard sweep to 10^7 Hz)
-# For simplicity, we'll assume the input noise PSD is constant.
-# The maximum value of the theoretical CR-RC^n filter's PSD is a good point to relate.
-# From the old report (Fig 7), the noise PSD is roughly 2000 uV^2/Hz at low f.
-# We will use the average measured PSD over the flat region of the *amplifier* noise.
-flat_region_end_index = np.where(wzmacniacz_noise_data[:, 0] < 1e6)[0][-1] if len(wzmacniacz_noise_data[:, 0]) > 0 else -1
-S_in_uV2_Hz = np.mean(wzmacniacz_noise_psd_meas[:flat_region_end_index]) # The "input" noise PSD is measured at the amp output *before* filtering.
-
+Vinrms = 121.7 * 1e-3 #V
+df = 1e7 - 1e4 # Hz
+S_in_uV2_Hz = (Vinrms**2) / df # Input noise PSD in (uV^2/Hz)
 # Plot for Wzmacniacz Noise (PSD)
+wzmacniacz_noise_data[:,1] = wzmacniacz_noise_data[:,1] * 1e-6 # Convert from uV/sqrt(Hz) to V/sqrt(Hz)
 plt.figure()
-plt.plot(wzmacniacz_noise_data[:,0], wzmacniacz_noise_psd_meas, label="Wzmacniacz", color='green', marker='.', linestyle='')
+plt.plot(wzmacniacz_noise_data[:,0], wzmacniacz_noise_data[:,1]**2, label="Wzmacniacz", color='green', marker='.', linestyle='')
 plt.xscale('log')
-plt.ylabel("Widmowa gęstość mocy szumów [µV²/Hz]")
+plt.ylabel("Widmowa gęstość mocy szumów [V²/Hz]")
 plt.xlabel("Częstotliwość [Hz]")
 plt.title("Widmowa Gęstość Mocy Szumów Wzmacniacza")
 plt.grid(True, which="both", ls="--")
@@ -135,8 +117,8 @@ for f in fs:
         # Load filter data (Noise in uV/sqrt(Hz))
         file_path = f"{directory}/{c}{f}_noise.txt" # Assuming noise files are named like 'CR100k_noise.txt'
         data_noise = load_data(file_path)
-        
-        # Calculate measured PSD in (uV^2/Hz)
+        data_noise[:,1] = data_noise[:,1] * 1e-6 # Convert from uV/sqrt(Hz) to V/sqrt(Hz)
+        # Calculate measured PSD in (V^2/Hz)
         noise_psd_meas = data_noise[:, 1]**2
         
         freq = f.replace("k", "e3").replace("M", "e6")
@@ -147,18 +129,18 @@ for f in fs:
         u = 2 * np.pi * data_noise[:, 0] * tau
         
         # Calculate Theoretical PSD: S_out = |H(jω)|^2 * S_in
-        H2_values = H_mag_sq(c_f, u)
-        noise_psd_theor = H2_values * S_in_uV2_Hz
+        H2_values = c_f(u)**2
+        noise_psd_theor = H2_values * wzmacniacz_noise_data[:,1]**2
         
         # Plot Measured and Theoretical Noise PSD
         plt.figure()
-        plt.plot(data_noise[:, 0], noise_psd_meas, label="Zmierzone dane [µV²/Hz]", color='blue', marker='.', linestyle='')
-        plt.plot(data_noise[:, 0], noise_psd_theor, label=f"Teoretyczna ({f.replace('k', ' kHz').replace('M', ' MHz')}) [µV²/Hz]", color='red')
+        plt.plot(data_noise[:, 0], noise_psd_meas, label="Zmierzone dane [V²/Hz]", color='blue', marker='.', linestyle='')
+        plt.plot(data_noise[:, 0], noise_psd_theor, label=f"Teoretyczna ({f.replace('k', ' kHz').replace('M', ' MHz')}) [V²/Hz]", color='red')
         
         plt.xscale('log')
         plt.title(f"Widmowa Gęstość Mocy Szumów: {c}")
         plt.xlabel("Częstotliwość [Hz]")
-        plt.ylabel("Widmowa gęstość mocy szumów [µV²/Hz]")
+        plt.ylabel("Widmowa gęstość mocy szumów [V²/Hz]")
         plt.legend()
         plt.grid(True, which="both", ls="--")
         plt.savefig(f"plots/{c}{f}_noise_psd.png")
@@ -166,12 +148,12 @@ for f in fs:
         # 
 
         # Calculate Vrms - Formula: V_rms = sqrt(Integral(S_out * df)) [cite: 114]
-        # Measured Vrms (from uV^2/Hz) - need to convert uV^2/Hz to V^2/Hz before integration
-        Vrms_meas_V = np.sqrt(trapz(y=noise_psd_meas * 1e-12, x=data_noise[:, 0]))
+        # Measured Vrms (from V^2/Hz) - need to convert uV^2/Hz to V^2/Hz before integration
+        Vrms_meas_V = np.sqrt(trapz(y=noise_psd_meas, x=data_noise[:, 0]))
         Vrms_meas_uV = Vrms_meas_V * 1e6
         
-        # Theoretical Vrms (from uV^2/Hz) - need to convert uV^2/Hz to V^2/Hz before integration
-        Vrms_theor_V = np.sqrt(trapz(y=noise_psd_theor * 1e-12, x=data_noise[:, 0]))
+        # Theoretical Vrms (from V^2/Hz) - need to convert uV^2/Hz to V^2/Hz before integration
+        Vrms_theor_V = np.sqrt(trapz(y=noise_psd_theor, x=data_noise[:, 0]))
         Vrms_theor_uV = Vrms_theor_V * 1e6
         
         # Save results
